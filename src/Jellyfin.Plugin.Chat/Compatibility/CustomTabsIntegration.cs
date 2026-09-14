@@ -35,11 +35,26 @@ public static class CustomTabsIntegration
 
             newTab.GetType().GetProperty("Title")?.SetValue(newTab, title);
             newTab.GetType().GetProperty("ContentHtml")?.SetValue(newTab, ReadTemplate());
-            var updatedTabs = Array.CreateInstance(tabType, tabs.Length + 1);
-            Array.Copy(tabs, updatedTabs, tabs.Length);
-            updatedTabs.SetValue(newTab, tabs.Length);
-            tabsProperty.SetValue(configuration, updatedTabs);
+            existing = newTab;
         }
+
+        // Keep Content Requests before Chat regardless of plugin startup order.
+        var ordered = tabs.Cast<object?>().Where(tab => !IsChatTab(tab)).ToList();
+        var requestsIndex = ordered.FindIndex(IsContentRequestsTab);
+        ordered.Insert(requestsIndex >= 0 ? requestsIndex + 1 : ordered.Count, existing);
+        var tabElementType = tabsProperty.PropertyType.GetElementType();
+        if (tabElementType is null)
+        {
+            return false;
+        }
+
+        var reorderedTabs = Array.CreateInstance(tabElementType, ordered.Count);
+        for (var index = 0; index < ordered.Count; index++)
+        {
+            reorderedTabs.SetValue(ordered[index], index);
+        }
+
+        tabsProperty.SetValue(configuration, reorderedTabs);
 
         Save(plugin);
         return true;
@@ -100,6 +115,12 @@ public static class CustomTabsIntegration
     {
         var html = tab?.GetType().GetProperty("ContentHtml")?.GetValue(tab) as string;
         return html?.Contains(ContentMarker, StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private static bool IsContentRequestsTab(object? tab)
+    {
+        var html = tab?.GetType().GetProperty("ContentHtml")?.GetValue(tab) as string;
+        return html?.Contains("ContentRequests/Form", StringComparison.OrdinalIgnoreCase) == true;
     }
 
     private static string ReadTemplate()
