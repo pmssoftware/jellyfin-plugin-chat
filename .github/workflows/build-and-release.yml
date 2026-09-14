@@ -1,0 +1,101 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*.*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Jellyfin ${{ matrix.server }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - server: '10.11'
+            framework: net9.0
+            sdk: '9.0.x'
+          - server: '12.0'
+            framework: net10.0
+            sdk: '10.0.x'
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ matrix.sdk }}
+      - name: Choose plugin version
+        id: version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" ]]; then version="${GITHUB_REF_NAME#v}"; else version="0.0.0.${GITHUB_RUN_NUMBER}"; fi
+          if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then echo "Tags must look like v1.2.3.4" >&2; exit 1; fi
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - name: Build
+        run: dotnet build src/Jellyfin.Plugin.Chat/Jellyfin.Plugin.Chat.csproj --configuration Release --property:TargetFrameworks=${{ matrix.framework }} --property:PluginVersion=${{ steps.version.outputs.value }}
+      - name: Package
+        shell: bash
+        run: |
+          package_dir="${RUNNER_TEMP}/jellyfin-chat"
+          mkdir -p "$package_dir"
+          cp "src/Jellyfin.Plugin.Chat/bin/Release/${{ matrix.framework }}/Jellyfin.Plugin.Chat.dll" "$package_dir/"
+          cp ROADMAP.md LICENSE "$package_dir/"
+          archive="chat_${{ matrix.server }}_${{ steps.version.outputs.value }}.zip"
+          (cd "$package_dir" && zip -9 -r "$GITHUB_WORKSPACE/$archive" .)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: chat-${{ matrix.server }}
+          path: chat_${{ matrix.server }}_${{ steps.version.outputs.value }}.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    concurrency:
+      group: jellyfin-chat-release
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: chat-*
+          path: dist
+          merge-multiple: true
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" dist/*.zip --clobber
+          else
+            gh release create "$GITHUB_REF_NAME" dist/*.zip --title "Jellyfin Chat ${GITHUB_REF_NAME#v}" --generate-notes --verify-tag
+          fi
+      - name: Update Jellyfin repository manifest
+        run: python3 scripts/update_manifest.py --repository "$GITHUB_REPOSITORY" --tag "$GITHUB_REF_NAME" --artifacts dist
+      - name: Publish manifest
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          cp manifest.json "$RUNNER_TEMP/manifest.json"
+          git fetch origin "$DEFAULT_BRANCH"
+          git checkout -B "$DEFAULT_BRANCH" "origin/$DEFAULT_BRANCH"
+          cp "$RUNNER_TEMP/manifest.json" manifest.json
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add manifest.json
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "chore: publish ${GITHUB_REF_NAME} in plugin manifest"
+          git push origin "$DEFAULT_BRANCH"

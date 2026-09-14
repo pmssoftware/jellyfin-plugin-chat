@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFrameworks>net9.0;net10.0</TargetFrameworks>
+    <RootNamespace>Jellyfin.Plugin.Chat</RootNamespace>
+    <AssemblyName>Jellyfin.Plugin.Chat</AssemblyName>
+    <Description>Self-contained chat and announcement channels for Jellyfin.</Description>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>latest</LangVersion>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Jellyfin.Controller" Version="$(JellyfinPackageVersion)">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+    <PackageReference Include="Jellyfin.Model" Version="$(JellyfinPackageVersion)">
+      <ExcludeAssets>runtime</ExcludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Web/admin.html" />
+    <EmbeddedResource Include="Web/chat-app.html" />
+    <EmbeddedResource Include="Web/chat-bridge.js" />
+    <EmbeddedResource Include="../../customtabs.html"
+                      Link="Web/customtabs.html"
+                      LogicalName="Jellyfin.Plugin.Chat.Web.customtabs.html" />
+  </ItemGroup>
+</Project>

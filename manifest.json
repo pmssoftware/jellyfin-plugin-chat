@@ -1,0 +1,11 @@
+[
+  {
+    "guid": "6d952fa7-3c3f-46b1-a3f7-69dc705f2692",
+    "name": "Jellyfin Chat",
+    "description": "Self-contained chat and announcement channels for Jellyfin users.",
+    "overview": "Public chat, administrator announcements, channels, history, and moderation without a separate server.",
+    "owner": "pms",
+    "category": "General",
+    "versions": []
+  }
+]

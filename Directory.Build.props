@@ -1,0 +1,22 @@
+<Project>
+  <PropertyGroup>
+    <PluginVersion>1.0.0.0</PluginVersion>
+    <Version>$(PluginVersion)</Version>
+    <AssemblyVersion>$(PluginVersion)</AssemblyVersion>
+    <FileVersion>$(PluginVersion)</FileVersion>
+    <Authors>Jellyfin Chat contributors</Authors>
+    <Company>Jellyfin Chat contributors</Company>
+    <Product>Jellyfin Chat</Product>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net9.0'">
+    <JellyfinServerLine>10.11</JellyfinServerLine>
+    <JellyfinPackageVersion Condition="'$(JellyfinPackageVersion)' == ''">10.11.11</JellyfinPackageVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <JellyfinServerLine>12.0</JellyfinServerLine>
+    <JellyfinPackageVersion Condition="'$(JellyfinPackageVersion)' == ''">12.0.0</JellyfinPackageVersion>
+  </PropertyGroup>
+</Project>
