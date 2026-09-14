@@ -83,7 +83,9 @@
                 button.style.display=enabled?'':'none'; const label=button.querySelector('.emby-button-foreground'); if(label)label.textContent=tabName;
                 this.ensureSidebarLink(tabName,enabled,index);
                 let pane=document.getElementById('customTab_'+index);
-                if(!pane){pane=document.createElement('div');pane.id='customTab_'+index;pane.className='tabContent pageTabContent';pane.dataset.index=String(index+2);const iframe=document.createElement('iframe');iframe.title=tabName;iframe.src=ApiClient.getUrl('JellyfinChat/App');iframe.style.cssText='display:block;width:100%;height:calc(100vh - 7.5rem);min-height:32rem;border:0;background:transparent';pane.appendChild(iframe);favorites.insertAdjacentElement('afterend',pane);}
+                if(!pane){pane=document.createElement('div');pane.id='customTab_'+index;pane.className='tabContent pageTabContent';pane.dataset.index=String(index+2);favorites.insertAdjacentElement('afterend',pane);}
+                let iframe=pane.querySelector('iframe');
+                if(!iframe||!String(iframe.getAttribute('src')||'').includes('JellyfinChat/App')){iframe=document.createElement('iframe');iframe.title=tabName;iframe.src=ApiClient.getUrl('JellyfinChat/App');iframe.style.cssText='display:block;width:100%;height:calc(100vh - 7.5rem);min-height:32rem;border:0;background:transparent';pane.replaceChildren(iframe);}
                 pane.style.display=enabled?'':'none';
                 this.complete=true;
             } catch(error) { console.debug('Jellyfin Chat: waiting for CustomTabs.',error); }
