@@ -65,7 +65,7 @@
             const label = link.querySelector('.navMenuOptionText, .emby-button-foreground'); if (label) label.textContent = tabName;
             const existing = link.querySelector('svg, .material-icons, .material-symbols-rounded'); const container = existing && existing.parentElement;
             if (container && container.dataset.jellyfinChatIcon !== 'true') {
-                const icon=document.createElement('span'); icon.className='material-icons'; icon.setAttribute('aria-hidden','true'); icon.style.fontSize='1.5rem'; icon.textContent='forum';
+                const icon=document.createElement('span'); icon.className='material-icons'; icon.setAttribute('aria-hidden','true'); icon.style.cssText='display:inline-flex;align-items:center;justify-content:center;width:1.5rem;flex:0 0 1.5rem;margin-right:1.2rem;font-size:1.5rem'; icon.textContent='forum';
                 if (container===link || (label && container.contains(label))) { link.querySelectorAll('svg,.material-icons,.material-symbols-rounded').forEach(item=>item.remove()); label?link.insertBefore(icon,label):link.prepend(icon); link.dataset.jellyfinChatIcon='true'; }
                 else { container.replaceChildren(icon); container.dataset.jellyfinChatIcon='true'; }
             }
