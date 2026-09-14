@@ -24,6 +24,7 @@
     <EmbeddedResource Include="Web/admin.html" />
     <EmbeddedResource Include="Web/chat-app.html" />
     <EmbeddedResource Include="Web/chat-bridge.js" />
+    <EmbeddedResource Include="Web/e2ee-client.bundle.js" />
     <EmbeddedResource Include="../../customtabs.html"
                       Link="Web/customtabs.html"
                       LogicalName="Jellyfin.Plugin.Chat.Web.customtabs.html" />

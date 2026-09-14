@@ -40,6 +40,22 @@ public sealed class ChatController : ControllerBase
         return Content(reader.ReadToEnd(), "text/html; charset=utf-8");
     }
 
+    [HttpGet("E2eeClient")]
+    [AllowAnonymous]
+    [Produces("text/javascript")]
+    public ActionResult GetE2eeClient()
+    {
+        using var stream = typeof(Plugin).Assembly.GetManifestResourceStream("Jellyfin.Plugin.Chat.Web.e2ee-client.bundle.js");
+        if (stream is null)
+        {
+            return NotFound();
+        }
+
+        using var reader = new StreamReader(stream);
+        Response.Headers.CacheControl = "no-store";
+        return Content(reader.ReadToEnd(), "text/javascript; charset=utf-8");
+    }
+
     [HttpGet("Bootstrap")]
     [Authorize]
     public ActionResult<ChatBootstrap> Bootstrap()
@@ -59,8 +75,211 @@ public sealed class ChatController : ControllerBase
             IsMuted = plugin.Store.IsMuted(user.Id),
             IsEnabled = isEnabled,
             CurrentUserName = user.Name,
+            CurrentUserId = user.Id,
             MessageLimit = plugin.Store.GetSettings().MessageLimit
         });
+    }
+
+    [HttpPost("Crypto/Devices")]
+    [Authorize]
+    public ActionResult<ChatCryptoDevice> RegisterCryptoDevice([FromBody] RegisterCryptoDeviceRequest input)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Plugin.Instance is { } plugin
+                ? Ok(plugin.Store.RegisterCryptoDevice(user.Id.Value, user.Name, input))
+                : NotFound();
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { Message = exception.Message });
+        }
+    }
+
+    [HttpGet("Crypto/Devices")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public ActionResult GetCryptoDevices()
+    {
+        return Plugin.Instance is { } plugin ? Ok(plugin.Store.GetCryptoDevices()) : NotFound();
+    }
+
+    [HttpDelete("Crypto/Devices/{deviceId:guid}")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public ActionResult RevokeCryptoDevice([FromRoute] Guid deviceId)
+    {
+        return Plugin.Instance?.Store.RevokeCryptoDevice(deviceId) == true ? NoContent() : NotFound();
+    }
+
+    [HttpPost("Crypto/Channels/{channelId:guid}/KeyPackages")]
+    [Authorize]
+    public ActionResult<ChatCryptoKeyPackage> PublishCryptoKeyPackage(
+        [FromRoute] Guid channelId,
+        [FromBody] PublishKeyPackageRequest input)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Plugin.Instance is { } plugin
+                ? Ok(plugin.Store.PublishCryptoKeyPackage(channelId, user.Id.Value, input))
+                : NotFound();
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { Message = exception.Message });
+        }
+    }
+
+    [HttpGet("Crypto/Channels/{channelId:guid}")]
+    [Authorize]
+    public ActionResult<CryptoChannelBootstrap> GetCryptoChannel(
+        [FromRoute] Guid channelId,
+        [FromQuery] Guid deviceId,
+        [FromQuery] long afterSequence = 0,
+        [FromQuery] int limit = 200)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Plugin.Instance is { } plugin
+                ? Ok(plugin.Store.GetCryptoBootstrap(channelId, deviceId, user.Id.Value, afterSequence, limit))
+                : NotFound();
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { Message = exception.Message });
+        }
+    }
+
+    [HttpPost("Crypto/Channels/{channelId:guid}/Claim")]
+    [Authorize]
+    public ActionResult<ChatCryptoGroup> ClaimCryptoChannel(
+        [FromRoute] Guid channelId,
+        [FromBody] ClaimCryptoGroupRequest input)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Plugin.Instance is { } plugin
+                ? StatusCode(StatusCodes.Status201Created, plugin.Store.ClaimCryptoGroup(channelId, input.DeviceId, user.Id.Value))
+                : NotFound();
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { Message = exception.Message });
+        }
+    }
+
+    [HttpPost("Crypto/Channels/{channelId:guid}/Commits")]
+    [Authorize]
+    public ActionResult<ChatCryptoEvent> CommitCryptoChannel(
+        [FromRoute] Guid channelId,
+        [FromBody] CommitCryptoGroupRequest input)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Plugin.Instance is { } plugin
+                ? Ok(plugin.Store.CommitCryptoGroup(channelId, user.Id.Value, user.Name, input))
+                : NotFound();
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { Message = exception.Message });
+        }
+    }
+
+    [HttpPost("Crypto/Channels/{channelId:guid}/Messages")]
+    [Authorize]
+    public ActionResult<ChatCryptoEvent> CreateEncryptedMessage(
+        [FromRoute] Guid channelId,
+        [FromBody] CreateEncryptedMessageRequest input)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Plugin.Instance is { } plugin
+                ? StatusCode(StatusCodes.Status201Created, plugin.Store.AddEncryptedMessage(
+                    channelId,
+                    user.Id.Value,
+                    user.Name,
+                    user.IsAdministrator,
+                    input))
+                : NotFound();
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Message = exception.Message });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return Conflict(new { Message = exception.Message });
+        }
+    }
+
+    [HttpDelete("Crypto/Messages/{id:guid}")]
+    [Authorize(Policy = Policies.RequiresElevation)]
+    public ActionResult DeleteEncryptedMessage([FromRoute] Guid id)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        return Plugin.Instance?.Store.DeleteEncryptedMessage(id, user.Id.Value, user.Name) is not null
+            ? NoContent()
+            : NotFound();
     }
 
     [HttpGet("Messages")]
@@ -82,38 +301,10 @@ public sealed class ChatController : ControllerBase
     [Authorize]
     public ActionResult<ChatMessage> CreateMessage([FromBody] CreateMessageRequest input)
     {
-        var plugin = Plugin.Instance;
-        if (plugin is null)
+        return StatusCode(StatusCodes.Status426UpgradeRequired, new
         {
-            return Problem("Jellyfin Chat is not ready.", statusCode: StatusCodes.Status503ServiceUnavailable);
-        }
-
-        var user = CurrentUser();
-        if (!plugin.Store.IsChatEnabledFor(user.Id))
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { Message = "Chat is not enabled for this user." });
-        }
-
-        var body = input.Body?.Trim() ?? string.Empty;
-        var limit = plugin.Store.GetSettings().MessageLimit;
-        if (body.Length == 0 || body.Length > limit)
-        {
-            return BadRequest(new { Message = $"Messages must contain between 1 and {limit} characters." });
-        }
-
-        try
-        {
-            var message = plugin.Store.AddMessage(input.ChannelId, user.Id, user.Name, body, user.IsAdministrator);
-            return StatusCode(StatusCodes.Status201Created, message);
-        }
-        catch (UnauthorizedAccessException exception)
-        {
-            return StatusCode(StatusCodes.Status403Forbidden, new { Message = exception.Message });
-        }
-        catch (InvalidOperationException exception)
-        {
-            return BadRequest(new { Message = exception.Message });
-        }
+            Message = "This plugin version accepts new messages only through the end-to-end encrypted chat client."
+        });
     }
 
     [HttpDelete("Messages/{id:guid}")]
@@ -211,7 +402,7 @@ public sealed class ChatController : ControllerBase
     }
 
     [HttpGet("Settings")]
-    [Authorize]
+    [Authorize(Policy = Policies.RequiresElevation)]
     public ActionResult<ChatSettings> GetSettings()
     {
         return Plugin.Instance is { } plugin ? Ok(plugin.Store.GetSettings()) : NotFound();

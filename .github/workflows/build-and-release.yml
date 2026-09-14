@@ -12,6 +12,20 @@ permissions:
   contents: read
 
 jobs:
+  web:
+    name: Encrypted web client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run test:e2ee
+      - run: pnpm run build:e2ee
+      - run: git diff --exit-code -- src/Jellyfin.Plugin.Chat/Web/e2ee-client.bundle.js
+
   build:
     name: Jellyfin ${{ matrix.server }}
     runs-on: ubuntu-latest
@@ -45,7 +59,7 @@ jobs:
           package_dir="${RUNNER_TEMP}/jellyfin-chat"
           mkdir -p "$package_dir"
           cp "src/Jellyfin.Plugin.Chat/bin/Release/${{ matrix.framework }}/Jellyfin.Plugin.Chat.dll" "$package_dir/"
-          cp ROADMAP.md LICENSE "$package_dir/"
+          cp ROADMAP.md LICENSE THIRD_PARTY_NOTICES "$package_dir/"
           archive="chat_${{ matrix.server }}_${{ steps.version.outputs.value }}.zip"
           (cd "$package_dir" && zip -9 -r "$GITHUB_WORKSPACE/$archive" .)
       - uses: actions/upload-artifact@v7
@@ -56,7 +70,7 @@ jobs:
 
   release:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, web]
     runs-on: ubuntu-latest
     permissions:
       contents: write

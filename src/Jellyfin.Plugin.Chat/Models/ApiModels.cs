@@ -65,6 +65,10 @@ public sealed class ChatBootstrap
 
     public string CurrentUserName { get; set; } = string.Empty;
 
+    public Guid? CurrentUserId { get; set; }
+
+    public string EncryptionProtocol { get; set; } = "MLS 1.0";
+
     public int PollIntervalMilliseconds { get; set; } = 2500;
 
     public int MessageLimit { get; set; }

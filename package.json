@@ -1,0 +1,17 @@
+{
+  "name": "jellyfin-plugin-chat-web",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@11.19.0",
+  "scripts": {
+    "build:e2ee": "esbuild web-src/e2ee-client.js --bundle --minify --format=iife --global-name=JellyfinChatE2EE --target=chrome100,firefox100,safari15 --outfile=src/Jellyfin.Plugin.Chat/Web/e2ee-client.bundle.js",
+    "test:e2ee": "node tests/e2ee-roundtrip.mjs && node tests/e2ee-client-flow.mjs"
+  },
+  "dependencies": {
+    "@noble/hashes": "2.3.0",
+    "ts-mls": "1.6.4"
+  },
+  "devDependencies": {
+    "esbuild": "0.25.9"
+  }
+}

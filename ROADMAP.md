@@ -2,6 +2,14 @@
 
 Jellyfin Chat adds self-contained chat and announcement channels to Jellyfin. It uses Jellyfin accounts and runs inside the Jellyfin server; no separate chat server, database service, or account system is required.
 
+## Version 1.1
+
+- Experimental MLS 1.0 end-to-end encryption for all new message bodies
+- Automatic per-browser device registration, group joining, and key rotation
+- Local device-identity pinning and visible per-channel security codes
+- Administrator revocation of lost encrypted devices
+- Browser-only private key and decrypted-message storage
+
 ## Version 1.0
 
 - A public chat channel for every authenticated Jellyfin user
@@ -41,14 +49,20 @@ Install **Jellyfin Chat**, restart Jellyfin, and force-refresh Jellyfin Web once
 ## Security and moderation
 
 - Every data endpoint requires a valid Jellyfin session.
+- New message bodies are encrypted in the browser with MLS 1.0 before they reach Jellyfin.
+- Device key packages are exchanged automatically; a newly connected browser may briefly wait for an existing encrypted device to add it to the channel.
+- Private key material and decrypted message history stay in that browser's IndexedDB storage.
+- Per-channel device identities are pinned locally and each channel displays a security code for out-of-band comparison.
 - Message endpoints enforce both the global switch and the current user's access setting.
 - Channel management, settings, message deletion, and user muting require administrator elevation.
+- Administrators can revoke lost encrypted devices and delete ciphertext, but cannot decrypt message bodies through the plugin API.
 - Message bodies are rendered as plain text, not HTML.
-- Message length and posting frequency are enforced by the server.
+- Message length is enforced by the encrypted client; posting frequency is enforced by the server.
 - Hidden home tabs and background browser pages do not poll for messages.
-- Version 1.0 is not end-to-end encrypted. Use HTTPS when messages must be protected in transit, including on an untrusted local network.
 
-Administrators can read and moderate version 1.0 messages. This is intentional: true end-to-end encryption conflicts with server-side moderation and requires device keys, membership key rotation, recovery, and verification flows.
+End-to-end encryption is experimental. The bundled `ts-mls` implementation has not received a formal security audit, and a web client delivered by a compromised Jellyfin server could be modified before it runs. Use HTTPS, compare the displayed security code when trust matters, and do not treat this release as equivalent to an audited native messenger. Jellyfin still sees channel membership, sender, timestamps, and message sizes. Clearing browser storage removes local keys and decrypted history; there is no recovery mechanism yet.
+
+Messages created by version 1.0 remain plaintext in the old server data until normal retention removes them. They are not imported into or displayed by the encrypted client. See `THIRD_PARTY_NOTICES` for bundled cryptography credits.
 
 ## Roadmap
 
@@ -57,7 +71,8 @@ The roadmap is directional; later features will be designed without breaking the
 ### 1.x
 
 - Replies, reactions, mentions, and unread counts
-- Private non-encrypted groups and invitations
+- Private groups and invitations using the encrypted group layer
+- Device recovery and a fuller device-verification interface
 - Improved live delivery beyond short polling
 - Reporting and more granular channel permissions
 
@@ -65,7 +80,7 @@ The roadmap is directional; later features will be designed without breaking the
 
 - Separate responsive web client using Jellyfin authentication
 - Mobile clients and notification support
-- Optional end-to-end encryption for private groups, with explicit device and recovery management
+- Native key storage and stronger device-verification flows
 
 ### 3.x
 
