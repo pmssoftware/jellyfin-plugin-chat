@@ -14,6 +14,11 @@
         request(path) {
             return ApiClient.fetch({url:ApiClient.getUrl(path),type:'GET',dataType:'json',headers:{accept:'application/json'}});
         },
+        normalizePaneOrder(favorites) {
+            const panes=Array.from(document.querySelectorAll('[id^="customTab_"]')).sort((left,right)=>Number(left.id.slice(10))-Number(right.id.slice(10)));
+            let anchor=favorites;
+            panes.forEach(pane=>{if(anchor.nextElementSibling!==pane)anchor.insertAdjacentElement('afterend',pane);anchor=pane;});
+        },
         ensureAdminLink() {
             let link = document.querySelector('a[href*="configurationpage?name=jellyfin-chat"]');
             if (!link) {
@@ -86,6 +91,7 @@
                 if(!pane){pane=document.createElement('div');pane.id='customTab_'+index;pane.className='tabContent pageTabContent';pane.dataset.index=String(index+2);favorites.insertAdjacentElement('afterend',pane);}
                 let iframe=pane.querySelector('iframe');
                 if(!iframe||!String(iframe.getAttribute('src')||'').includes('JellyfinChat/App')){iframe=document.createElement('iframe');iframe.title=tabName;iframe.src=ApiClient.getUrl('JellyfinChat/App');iframe.style.cssText='display:block;width:100%;height:calc(100vh - 7.5rem);min-height:32rem;border:0;background:transparent';pane.replaceChildren(iframe);}
+                this.normalizePaneOrder(favorites);
                 pane.style.display=enabled?'':'none';
                 this.complete=true;
             } catch(error) { console.debug('Jellyfin Chat: waiting for CustomTabs.',error); }
