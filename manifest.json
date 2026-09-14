@@ -6,6 +6,7 @@
     "overview": "Public chat, administrator announcements, channels, history, and moderation without a separate server.",
     "owner": "pms",
     "category": "General",
+    "imageUrl": "https://raw.githubusercontent.com/pmssoftware/jellyfin-plugin-chat/main/artwork/plugin-banner.png",
     "versions": [
       {
         "version": "1.0.0.0",
