@@ -9,6 +9,22 @@
     "imageUrl": "https://raw.githubusercontent.com/pmssoftware/jellyfin-plugin-chat/main/artwork/plugin-banner.png",
     "versions": [
       {
+        "version": "1.0.0.1",
+        "changelog": "See the linked GitHub release for changes.",
+        "targetAbi": "10.11.11.0",
+        "sourceUrl": "https://github.com/pmssoftware/jellyfin-plugin-chat/releases/download/v1.0.0.1/chat_10.11_1.0.0.1.zip",
+        "checksum": "F468BD88353C894D7E69347F11C340F9",
+        "timestamp": "2026-09-14T14:40:04Z"
+      },
+      {
+        "version": "1.0.0.1",
+        "changelog": "See the linked GitHub release for changes.",
+        "targetAbi": "12.0.0.0",
+        "sourceUrl": "https://github.com/pmssoftware/jellyfin-plugin-chat/releases/download/v1.0.0.1/chat_12.0_1.0.0.1.zip",
+        "checksum": "0AF9046A42F6185B94F3A6C7155D4191",
+        "timestamp": "2026-09-14T14:40:04Z"
+      },
+      {
         "version": "1.0.0.0",
         "changelog": "See the linked GitHub release for changes.",
         "targetAbi": "10.11.11.0",
