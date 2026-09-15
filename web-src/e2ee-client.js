@@ -33,7 +33,7 @@ function property(item, name, fallback) {
 }
 
 function normalizeId(value) {
-  return String(value || '').toLowerCase();
+  return String(value || '').toLowerCase().replace(/[{}-]/g, '');
 }
 
 function bytesEqual(left, right) {
@@ -147,7 +147,7 @@ export class EncryptedChatClient {
     this.messageLimit = Math.min(4000, Math.max(100, Number(options.messageLimit) || 1000));
     this.suitePromise = getCiphersuiteImpl(getCiphersuiteFromName(CIPHERSUITE));
     this.device = null;
-    this.syncing = new Map();
+    this.channelOperations = new Map();
     this.publishedChannels = new Set();
   }
 
@@ -269,7 +269,7 @@ export class EncryptedChatClient {
       key: this.channelKey('group', channelId),
       state: toBase64(encodeGroupState(state)),
       lastSequence: Number(previous.lastSequence || 0),
-      ownEventIds: Array.from(new Set(previous.ownEventIds || [])).slice(-256),
+      ownEventIds: Array.from(new Set((previous.ownEventIds || []).map(normalizeId))).slice(-256),
     };
     await putRecord(record);
     return record;
@@ -384,7 +384,7 @@ export class EncryptedChatClient {
         );
         await this.verifyAndPinMembers(channelId, state);
       } else if (kind === 'Commit' && state) {
-        if (!(record?.ownEventIds || []).includes(eventId)) {
+        if (!(record?.ownEventIds || []).some(id => normalizeId(id) === eventId)) {
           const message = decodeOne(decodeMlsMessage, fromBase64(property(event, 'Payload')), 'MLS commit');
           if (message.wireformat !== 'mls_private_message') throw new Error('Unexpected MLS commit format.');
           const result = await processPrivateMessage(state, message.privateMessage, makePskIndex(state, {}), suite);
@@ -398,7 +398,7 @@ export class EncryptedChatClient {
         }
       } else if (kind === 'Application' && state) {
         if (property(event, 'Payload')) {
-          if (!(record?.ownEventIds || []).includes(eventId)) {
+          if (!(record?.ownEventIds || []).some(id => normalizeId(id) === eventId)) {
             const message = decodeOne(decodeMlsMessage, fromBase64(property(event, 'Payload')), 'MLS application message');
             if (message.wireformat !== 'mls_private_message') throw new Error('Unexpected MLS application format.');
             const result = await processPrivateMessage(state, message.privateMessage, makePskIndex(state, {}), suite);
@@ -430,7 +430,7 @@ export class EncryptedChatClient {
 
       if (!record) record = { key: this.channelKey('group', channelId), ownEventIds: [] };
       record.lastSequence = sequence;
-      record.ownEventIds = (record.ownEventIds || []).filter(id => id !== eventId);
+      record.ownEventIds = (record.ownEventIds || []).map(normalizeId).filter(id => id !== eventId);
       if (state) record = await this.saveGroup(channelId, state, record);
       else await putRecord(record);
     }
@@ -617,12 +617,21 @@ export class EncryptedChatClient {
     };
   }
 
+  async runChannelOperation(channelId, operation) {
+    const normalized = normalizeId(channelId);
+    const previous = this.channelOperations.get(normalized) || Promise.resolve();
+    const current = previous.catch(() => {}).then(operation);
+    this.channelOperations.set(normalized, current);
+    try {
+      return await current;
+    } finally {
+      if (this.channelOperations.get(normalized) === current) this.channelOperations.delete(normalized);
+    }
+  }
+
   async sync(channelId) {
     const normalized = normalizeId(channelId);
-    if (this.syncing.has(normalized)) return this.syncing.get(normalized);
-    const promise = this.syncInternal(normalized).finally(() => this.syncing.delete(normalized));
-    this.syncing.set(normalized, promise);
-    return promise;
+    return this.runChannelOperation(normalized, () => this.syncInternal(normalized));
   }
 
   async send(channelId, body) {
@@ -630,7 +639,11 @@ export class EncryptedChatClient {
     const text = String(body || '').trim();
     if (!text) throw new Error('A message is required.');
     if (text.length > this.messageLimit) throw new Error(`Messages cannot exceed ${this.messageLimit} characters.`);
-    const synced = await this.sync(normalizedChannel);
+    return this.runChannelOperation(normalizedChannel, () => this.sendInternal(normalizedChannel, text));
+  }
+
+  async sendInternal(normalizedChannel, text) {
+    const synced = await this.syncInternal(normalizedChannel);
     if (synced.status !== 'ready') throw new Error('Waiting for the secure channel key.');
     let record = await this.loadGroupRecord(normalizedChannel);
     const bootstrap = await this.fetchBootstrap(normalizedChannel, Number(record?.lastSequence || 0));
@@ -696,7 +709,16 @@ export class EncryptedChatClient {
 }
 
 export async function createClient(options) {
-  if (!globalThis.crypto?.subtle || !globalThis.indexedDB) throw new Error('This browser does not support secure local chat keys.');
+  if (globalThis.isSecureContext === false || !globalThis.crypto?.subtle) {
+    const error = new Error('End-to-end encryption requires HTTPS or localhost.');
+    error.code = 'secure-context-required';
+    throw error;
+  }
+  if (!globalThis.indexedDB) {
+    const error = new Error('This browser does not provide secure local chat storage.');
+    error.code = 'secure-storage-unavailable';
+    throw error;
+  }
   const client = new EncryptedChatClient(options);
   await client.initialize();
   return client;

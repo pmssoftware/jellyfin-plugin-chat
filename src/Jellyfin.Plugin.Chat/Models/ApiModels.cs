@@ -69,7 +69,7 @@ public sealed class ChatBootstrap
 
     public string EncryptionProtocol { get; set; } = "MLS 1.0";
 
-    public int PollIntervalMilliseconds { get; set; } = 2500;
+    public int PollIntervalMilliseconds { get; set; } = 1000;
 
     public int MessageLimit { get; set; }
 }

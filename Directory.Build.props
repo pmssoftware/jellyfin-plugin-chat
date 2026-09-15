@@ -1,6 +1,6 @@
 <Project>
   <PropertyGroup>
-    <PluginVersion>1.1.0.0</PluginVersion>
+    <PluginVersion>1.1.0.1</PluginVersion>
     <Version>$(PluginVersion)</Version>
     <AssemblyVersion>$(PluginVersion)</AssemblyVersion>
     <FileVersion>$(PluginVersion)</FileVersion>

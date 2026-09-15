@@ -42,7 +42,6 @@ def main() -> int:
         raise ValueError("manifest.json must contain exactly one plugin entry")
 
     plugin = manifest[0]
-    existing = plugin.setdefault("versions", [])
     timestamp = dt.datetime.now(dt.timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
     additions = []
     for archive in sorted(args.artifacts.glob("chat_*.zip")):
@@ -61,8 +60,7 @@ def main() -> int:
 
     if len(additions) != len(TARGET_ABIS):
         raise FileNotFoundError("Expected one release artifact for each supported Jellyfin server line")
-    replaced = {(item["version"], item["targetAbi"]) for item in additions}
-    plugin["versions"] = additions + [item for item in existing if (item.get("version"), item.get("targetAbi")) not in replaced]
+    plugin["versions"] = additions
     manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return 0
 

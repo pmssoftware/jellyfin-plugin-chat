@@ -22,8 +22,13 @@ public static class WebTransformations
         }
 
         using var reader = new StreamReader(stream);
-        var script = $"<script defer>{reader.ReadToEnd()}</script>";
         var bodyIndex = contents.LastIndexOf("</body>", System.StringComparison.OrdinalIgnoreCase);
-        return bodyIndex >= 0 ? contents.Insert(bodyIndex, script) : contents + script;
+        if (bodyIndex < 0)
+        {
+            return contents;
+        }
+
+        var script = $"<script defer>{reader.ReadToEnd()}</script>";
+        return contents.Insert(bodyIndex, script);
     }
 }
