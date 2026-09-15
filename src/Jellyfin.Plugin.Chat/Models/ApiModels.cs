@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 
 namespace Jellyfin.Plugin.Chat.Models;
 
@@ -16,6 +17,21 @@ public sealed class CreateChannelRequest
     public string Description { get; set; } = string.Empty;
 
     public string Kind { get; set; } = ChatValues.ChatKind;
+
+    public bool IsRestricted { get; set; }
+
+    public List<Guid> MemberUserIds { get; set; } = new();
+}
+
+public sealed class CreatePrivateChannelRequest
+{
+    public string UserName { get; set; } = string.Empty;
+}
+
+public sealed class PrivateChatUser
+{
+    public Guid UserId { get; set; }
+    public string UserName { get; set; } = string.Empty;
 }
 
 public sealed class UpdateChannelRequest
@@ -29,6 +45,10 @@ public sealed class UpdateChannelRequest
     public int SortOrder { get; set; }
 
     public bool IsArchived { get; set; }
+
+    public bool IsRestricted { get; set; }
+
+    public List<Guid> MemberUserIds { get; set; } = new();
 }
 
 public sealed class MuteUserRequest
@@ -51,6 +71,8 @@ public sealed class ChatSettings
     public int MinimumSecondsBetweenMessages { get; set; }
 
     public int RetentionDays { get; set; }
+
+    public bool ShowEncryptionDetails { get; set; }
 }
 
 public sealed class ChatBootstrap
@@ -72,6 +94,8 @@ public sealed class ChatBootstrap
     public int PollIntervalMilliseconds { get; set; } = 1000;
 
     public int MessageLimit { get; set; }
+
+    public bool ShowEncryptionDetails { get; set; }
 }
 
 public sealed class SetUserAccessRequest

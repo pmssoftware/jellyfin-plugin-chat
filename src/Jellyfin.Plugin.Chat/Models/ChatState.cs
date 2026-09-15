@@ -4,7 +4,7 @@ namespace Jellyfin.Plugin.Chat.Models;
 
 public sealed class ChatState
 {
-    public int SchemaVersion { get; set; } = 2;
+    public int SchemaVersion { get; set; } = 3;
 
     public List<ChatChannel> Channels { get; set; } = new();
 

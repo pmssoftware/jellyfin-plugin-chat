@@ -612,6 +612,7 @@ export class EncryptedChatClient {
       deviceId: this.device.id,
       epoch: Number(state.groupContext.epoch),
       memberCount: this.memberEntries(state).length,
+      allParticipantsReady: Boolean(property(bootstrap, 'AllParticipantsReady')),
       securityCode: await this.securityCode(state),
       changed: reconciled.changed,
     };

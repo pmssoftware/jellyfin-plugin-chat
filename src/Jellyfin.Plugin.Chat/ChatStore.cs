@@ -47,6 +47,50 @@ public sealed class ChatStore
         }
     }
 
+    public IReadOnlyList<ChatChannel> GetChannelsForUser(bool includeArchived, Guid userId)
+    {
+        lock (_sync)
+        {
+            return _state.Channels
+                .Where(channel => (includeArchived || !channel.IsArchived) && CanAccessChannelUnsafe(channel, userId))
+                .OrderBy(channel => channel.SortOrder).ThenBy(channel => channel.CreatedAtUtc)
+                .Select(channel => channel.Copy()).ToList();
+        }
+    }
+
+    public IReadOnlyList<PrivateChatUser> GetPrivateChatUsers(Guid currentUserId, IEnumerable<PrivateChatUser> users)
+    {
+        lock (_sync)
+        {
+            return users.Where(user => user.UserId != currentUserId && IsUserEnabledUnsafe(user.UserId))
+                .OrderBy(user => user.UserName).ToList();
+        }
+    }
+
+    public ChatChannel AddOrGetPrivateChannel(Guid currentUserId, Guid otherUserId, string otherUserName)
+    {
+        lock (_sync)
+        {
+            if (currentUserId == Guid.Empty || otherUserId == Guid.Empty || currentUserId == otherUserId)
+                throw new InvalidOperationException("Choose another Jellyfin user.");
+            if (!IsUserEnabledUnsafe(currentUserId) || !IsUserEnabledUnsafe(otherUserId))
+                throw new UnauthorizedAccessException("Private chat is not enabled for this user.");
+            var ids = new[] { currentUserId, otherUserId }.OrderBy(id => id).ToList();
+            var pairKey = string.Join(":", ids);
+            var existing = _state.Channels.FirstOrDefault(channel => channel.IsPrivate && channel.DirectPairKey == pairKey && !channel.IsArchived);
+            if (existing is not null) return existing.Copy();
+            var channel = new ChatChannel
+            {
+                Id = Guid.NewGuid(), Name = otherUserName, Description = "Private conversation",
+                Kind = ChatValues.DirectKind, IsPrivate = true, IsRestricted = true,
+                MemberUserIds = ids, DirectPairKey = pairKey,
+                SortOrder = _state.Channels.Count == 0 ? 0 : _state.Channels.Max(item => item.SortOrder) + 1,
+                CreatedAtUtc = DateTime.UtcNow
+            };
+            _state.Channels.Add(channel); SaveUnsafe(); return channel.Copy();
+        }
+    }
+
     public IReadOnlyList<ChatMessage> GetMessages(Guid channelId, DateTime? afterUtc, int limit)
     {
         lock (_sync)
@@ -79,13 +123,18 @@ public sealed class ChatStore
         }
     }
 
+    public bool CanAccessChannel(Guid channelId, Guid userId)
+    {
+        lock (_sync) return _state.Channels.FirstOrDefault(channel => channel.Id == channelId && !channel.IsArchived) is { } channel
+            && CanAccessChannelUnsafe(channel, userId);
+    }
+
     public ChatMessage AddMessage(Guid channelId, Guid? authorId, string authorName, string body, bool isAdministrator)
     {
         lock (_sync)
         {
-            var channel = _state.Channels.FirstOrDefault(candidate => candidate.Id == channelId && !candidate.IsArchived)
-                ?? throw new InvalidOperationException("The channel does not exist or is archived.");
-            if (channel.Kind == ChatValues.AnnouncementKind && !isAdministrator)
+            var channel = RequireAccessibleChannelUnsafe(channelId, authorId ?? Guid.Empty);
+            if ((channel.Kind == ChatValues.AnnouncementKind || channel.Kind == ChatValues.RestrictedAnnouncementKind) && !isAdministrator)
             {
                 throw new UnauthorizedAccessException("Only administrators can post in announcement channels.");
             }
@@ -209,7 +258,7 @@ public sealed class ChatStore
     {
         lock (_sync)
         {
-            RequireActiveChannelUnsafe(channelId);
+            var channel = RequireAccessibleChannelUnsafe(channelId, userId);
             RequireOwnedDeviceUnsafe(input.DeviceId, userId);
             if (!IsUserEnabledUnsafe(userId))
             {
@@ -261,7 +310,7 @@ public sealed class ChatStore
     {
         lock (_sync)
         {
-            RequireActiveChannelUnsafe(channelId);
+            var channel = RequireAccessibleChannelUnsafe(channelId, userId);
             var currentDevice = RequireOwnedDeviceUnsafe(deviceId, userId);
             if (!IsUserEnabledUnsafe(userId))
             {
@@ -283,6 +332,7 @@ public sealed class ChatStore
             var group = _state.CryptoGroups.FirstOrDefault(candidate => candidate.ChannelId == channelId);
             var target = TargetCryptoMembersUnsafe(channelId).OrderBy(id => id).ToList();
             var members = group?.MemberDeviceIds.Distinct().OrderBy(id => id).ToList() ?? new List<Guid>();
+            var joinedUsers = _state.CryptoDevices.Where(device => members.Contains(device.Id) && !device.IsRevoked).Select(device => device.UserId).ToHashSet();
             var visibleDeviceIds = members.Concat(target).Append(deviceId).Distinct().ToHashSet();
             var devices = _state.CryptoDevices
                 .Where(device => visibleDeviceIds.Contains(device.Id))
@@ -332,7 +382,8 @@ public sealed class ChatStore
                 Devices = devices,
                 KeyPackages = keyPackages,
                 PendingKeyPackages = pending,
-                Events = events
+                Events = events,
+                AllParticipantsReady = (channel.IsPrivate || channel.IsRestricted) && channel.MemberUserIds.All(joinedUsers.Contains)
             };
         }
     }
@@ -341,7 +392,7 @@ public sealed class ChatStore
     {
         lock (_sync)
         {
-            RequireActiveChannelUnsafe(channelId);
+            RequireAccessibleChannelUnsafe(channelId, userId);
             RequireOwnedDeviceUnsafe(deviceId, userId);
             if (!IsUserEnabledUnsafe(userId))
             {
@@ -363,7 +414,11 @@ public sealed class ChatStore
             {
                 ChannelId = channelId,
                 Epoch = 0,
-                NextSequence = 1,
+                NextSequence = _state.CryptoEvents
+                    .Where(item => item.ChannelId == channelId)
+                    .Select(item => item.Sequence)
+                    .DefaultIfEmpty(0)
+                    .Max() + 1,
                 MemberDeviceIds = new List<Guid> { deviceId },
                 CreatedAtUtc = now,
                 UpdatedAtUtc = now
@@ -387,7 +442,7 @@ public sealed class ChatStore
                 throw new InvalidOperationException("A unique commit identifier is required.");
             }
 
-            RequireActiveChannelUnsafe(channelId);
+            RequireAccessibleChannelUnsafe(channelId, userId);
             RequireOwnedDeviceUnsafe(input.DeviceId, userId);
             if (!IsUserEnabledUnsafe(userId))
             {
@@ -500,7 +555,7 @@ public sealed class ChatStore
                 throw new InvalidOperationException("A unique message identifier is required.");
             }
 
-            var channel = RequireActiveChannelUnsafe(channelId);
+            var channel = RequireAccessibleChannelUnsafe(channelId, userId);
             RequireOwnedDeviceUnsafe(input.DeviceId, userId);
             if (!IsUserEnabledUnsafe(userId))
             {
@@ -521,7 +576,7 @@ public sealed class ChatStore
                 return duplicate.Copy();
             }
 
-            if (channel.Kind == ChatValues.AnnouncementKind && !isAdministrator)
+            if ((channel.Kind == ChatValues.AnnouncementKind || channel.Kind == ChatValues.RestrictedAnnouncementKind) && !isAdministrator)
             {
                 throw new UnauthorizedAccessException("Only administrators can post in announcement channels.");
             }
@@ -537,6 +592,15 @@ public sealed class ChatStore
             if (group.Epoch != input.Epoch || !group.MemberDeviceIds.Contains(input.DeviceId))
             {
                 throw new InvalidOperationException("The encrypted group changed. Synchronize and try again.");
+            }
+
+            if (channel.IsPrivate || channel.IsRestricted)
+            {
+                var joinedUsers = _state.CryptoDevices
+                    .Where(device => group.MemberDeviceIds.Contains(device.Id) && !device.IsRevoked)
+                    .Select(device => device.UserId).ToHashSet();
+                if (!channel.MemberUserIds.All(joinedUsers.Contains))
+                    throw new InvalidOperationException("Waiting for every participant to join the encrypted chat.");
             }
 
             var now = DateTime.UtcNow;
@@ -569,7 +633,7 @@ public sealed class ChatStore
         }
     }
 
-    public ChatCryptoEvent? DeleteEncryptedMessage(Guid id, Guid administratorId, string administratorName)
+    public ChatCryptoEvent? DeleteEncryptedMessage(Guid id, Guid userId, string userName, bool isAdministrator)
     {
         lock (_sync)
         {
@@ -585,6 +649,12 @@ public sealed class ChatStore
                 return null;
             }
 
+            var targetChannel = _state.Channels.FirstOrDefault(channel => channel.Id == target.ChannelId);
+            if (targetChannel is null || !CanAccessChannelUnsafe(targetChannel, userId))
+                throw new UnauthorizedAccessException("You are not a member of this private chat.");
+            if (!isAdministrator && target.AuthorId != userId)
+                throw new UnauthorizedAccessException("You can only delete your own messages.");
+
             target.Payload = string.Empty;
             var deletion = AddCryptoEventUnsafe(group, new ChatCryptoEvent
             {
@@ -593,8 +663,8 @@ public sealed class ChatStore
                 Epoch = group.Epoch,
                 Kind = CryptoEventKinds.Delete,
                 SenderDeviceId = Guid.Empty,
-                AuthorId = administratorId,
-                AuthorName = administratorName,
+                AuthorId = userId,
+                AuthorName = userName,
                 TargetEventId = target.Id,
                 AudienceDeviceIds = new List<Guid>(group.MemberDeviceIds),
                 CreatedAtUtc = DateTime.UtcNow
@@ -614,7 +684,9 @@ public sealed class ChatStore
                 Id = Guid.NewGuid(),
                 Name = input.Name,
                 Description = input.Description,
-                Kind = input.Kind,
+                Kind = input.IsRestricted && input.Kind == ChatValues.ChatKind ? ChatValues.RestrictedChatKind : input.IsRestricted && input.Kind == ChatValues.AnnouncementKind ? ChatValues.RestrictedAnnouncementKind : input.Kind,
+                IsRestricted = input.IsRestricted,
+                MemberUserIds = input.MemberUserIds.Distinct().ToList(),
                 SortOrder = _state.Channels.Count == 0 ? 0 : _state.Channels.Max(item => item.SortOrder) + 1,
                 CreatedAtUtc = DateTime.UtcNow
             };
@@ -634,6 +706,9 @@ public sealed class ChatStore
                 return null;
             }
 
+            if (channel.IsPrivate)
+                throw new InvalidOperationException("Private conversations cannot be edited here.");
+
             EnsureUniqueChannelName(input.Name, id);
             if (channel.IsDefault)
             {
@@ -646,6 +721,11 @@ public sealed class ChatStore
             channel.Kind = input.Kind;
             channel.SortOrder = input.SortOrder;
             channel.IsArchived = input.IsArchived;
+            channel.IsRestricted = input.IsRestricted;
+            channel.MemberUserIds = input.IsRestricted && input.MemberUserIds.Count == 0
+                ? new List<Guid>(channel.MemberUserIds)
+                : input.MemberUserIds.Distinct().ToList();
+            channel.Kind = input.IsRestricted && input.Kind == ChatValues.ChatKind ? ChatValues.RestrictedChatKind : input.IsRestricted && input.Kind == ChatValues.AnnouncementKind ? ChatValues.RestrictedAnnouncementKind : input.Kind;
             SaveUnsafe();
             return channel.Copy();
         }
@@ -656,7 +736,7 @@ public sealed class ChatStore
         lock (_sync)
         {
             var channel = _state.Channels.FirstOrDefault(candidate => candidate.Id == id);
-            if (channel is null || channel.IsDefault)
+            if (channel is null || channel.IsDefault || channel.IsPrivate)
             {
                 return false;
             }
@@ -671,10 +751,43 @@ public sealed class ChatStore
         }
     }
 
-    public bool DeleteMessage(Guid id)
+    public bool DeletePrivateChannel(Guid id, Guid userId)
     {
         lock (_sync)
         {
+            var channel = _state.Channels.FirstOrDefault(candidate =>
+                candidate.Id == id && candidate.IsPrivate && CanAccessChannelUnsafe(candidate, userId));
+            if (channel is null)
+            {
+                return false;
+            }
+
+            _state.Channels.Remove(channel);
+            _state.Messages.RemoveAll(message => message.ChannelId == id);
+            _state.CryptoKeyPackages.RemoveAll(package => package.ChannelId == id);
+            _state.CryptoGroups.RemoveAll(group => group.ChannelId == id);
+            _state.CryptoEvents.RemoveAll(item => item.ChannelId == id);
+            SaveUnsafe();
+            return true;
+        }
+    }
+
+    public bool DeleteMessage(Guid id, Guid userId)
+    {
+        lock (_sync)
+        {
+            var target = _state.Messages.FirstOrDefault(message => message.Id == id);
+            if (target is null)
+            {
+                return false;
+            }
+
+            var channel = _state.Channels.FirstOrDefault(candidate => candidate.Id == target.ChannelId && !candidate.IsArchived);
+            if (channel is null || !CanAccessChannelUnsafe(channel, userId))
+            {
+                throw new UnauthorizedAccessException("You are not a member of this private chat.");
+            }
+
             var removed = _state.Messages.RemoveAll(message => message.Id == id) > 0;
             if (removed)
             {
@@ -791,6 +904,7 @@ public sealed class ChatStore
             _plugin.Configuration.MessageLimit = Math.Clamp(settings.MessageLimit, 100, 4000);
             _plugin.Configuration.MinimumSecondsBetweenMessages = Math.Clamp(settings.MinimumSecondsBetweenMessages, 0, 300);
             _plugin.Configuration.RetentionDays = Math.Clamp(settings.RetentionDays, 1, 3650);
+            _plugin.Configuration.ShowEncryptionDetails = settings.ShowEncryptionDetails;
             _plugin.SaveConfiguration();
             PruneExpiredMessagesUnsafe();
             SaveUnsafe();
@@ -839,7 +953,11 @@ public sealed class ChatStore
             _state.CryptoKeyPackages ??= new List<ChatCryptoKeyPackage>();
             _state.CryptoGroups ??= new List<ChatCryptoGroup>();
             _state.CryptoEvents ??= new List<ChatCryptoEvent>();
-            _state.SchemaVersion = 2;
+            foreach (var channel in _state.Channels)
+            {
+                channel.MemberUserIds ??= new List<Guid>();
+            }
+            _state.SchemaVersion = 3;
             if (_state.Channels.Count != 0)
             {
                 return;
@@ -889,17 +1007,37 @@ public sealed class ChatStore
             return false;
         }
 
+        var activeCutoff = DateTime.UtcNow.AddMinutes(-10);
         var canAdvanceGroup = _state.CryptoDevices.Any(device =>
             group.MemberDeviceIds.Contains(device.Id)
             && !device.IsRevoked
-            && IsUserEnabledUnsafe(device.UserId));
+            && IsUserEnabledUnsafe(device.UserId)
+            && device.LastSeenAtUtc >= activeCutoff);
         if (canAdvanceGroup)
         {
             return false;
         }
 
+        // A browser origin change (for example moving Jellyfin from :8920 to :443)
+        // creates new device identities. If every old group member is offline while
+        // a current device is waiting with a fresh key package, let that device
+        // recover the channel instead of waiting forever for an unreachable key.
+        var hasActiveReplacement = _state.CryptoKeyPackages.Any(package =>
+            package.ChannelId == channelId
+            && !package.IsConsumed
+            && _state.CryptoDevices.Any(device =>
+                device.Id == package.DeviceId
+                && !device.IsRevoked
+                && IsUserEnabledUnsafe(device.UserId)
+                && device.LastSeenAtUtc >= activeCutoff));
+        if (!hasActiveReplacement)
+        {
+            return false;
+        }
+
         _state.CryptoGroups.Remove(group);
-        _state.CryptoEvents.RemoveAll(item => item.ChannelId == channelId);
+        _state.CryptoEvents.RemoveAll(item => item.ChannelId == channelId
+            && (item.Kind == CryptoEventKinds.Commit || item.Kind == CryptoEventKinds.Welcome));
         _state.CryptoKeyPackages.RemoveAll(package => package.ChannelId == channelId && package.IsConsumed);
         return true;
     }
@@ -908,6 +1046,20 @@ public sealed class ChatStore
     {
         return _state.Channels.FirstOrDefault(channel => channel.Id == channelId && !channel.IsArchived)
             ?? throw new InvalidOperationException("The channel does not exist or is archived.");
+    }
+
+    private ChatChannel RequireAccessibleChannelUnsafe(Guid channelId, Guid userId)
+    {
+        var channel = RequireActiveChannelUnsafe(channelId);
+        if (!CanAccessChannelUnsafe(channel, userId))
+            throw new UnauthorizedAccessException("You are not a member of this private chat.");
+        return channel;
+    }
+
+    private static bool CanAccessChannelUnsafe(ChatChannel channel, Guid userId)
+    {
+        return !channel.IsPrivate && !channel.IsRestricted
+            || (channel.MemberUserIds ?? new List<Guid>()).Contains(userId);
     }
 
     private ChatCryptoDevice RequireOwnedDeviceUnsafe(Guid deviceId, Guid userId)
@@ -930,9 +1082,12 @@ public sealed class ChatStore
 
     private IEnumerable<Guid> TargetCryptoMembersUnsafe(Guid channelId)
     {
+        var channel = _state.Channels.FirstOrDefault(item => item.Id == channelId);
         var group = _state.CryptoGroups.FirstOrDefault(candidate => candidate.ChannelId == channelId);
         var eligible = _state.CryptoDevices
-            .Where(device => !device.IsRevoked && IsUserEnabledUnsafe(device.UserId))
+            .Where(device => !device.IsRevoked && IsUserEnabledUnsafe(device.UserId)
+                && (channel is null || (!channel.IsPrivate && !channel.IsRestricted
+                    || (channel.MemberUserIds ?? new List<Guid>()).Contains(device.UserId))))
             .Select(device => device.Id)
             .ToHashSet();
         var members = group?.MemberDeviceIds.Where(eligible.Contains) ?? Enumerable.Empty<Guid>();
@@ -981,7 +1136,8 @@ public sealed class ChatStore
         TabName = string.IsNullOrWhiteSpace(_plugin.Configuration.TabName) ? "Chat" : _plugin.Configuration.TabName.Trim(),
         MessageLimit = Math.Clamp(_plugin.Configuration.MessageLimit, 100, 4000),
         MinimumSecondsBetweenMessages = Math.Clamp(_plugin.Configuration.MinimumSecondsBetweenMessages, 0, 300),
-        RetentionDays = Math.Clamp(_plugin.Configuration.RetentionDays, 1, 3650)
+        RetentionDays = Math.Clamp(_plugin.Configuration.RetentionDays, 1, 3650),
+        ShowEncryptionDetails = _plugin.Configuration.ShowEncryptionDetails
     };
 
     private void Save()

@@ -14,4 +14,6 @@ public sealed class PluginConfiguration : BasePluginConfiguration
     public int MinimumSecondsBetweenMessages { get; set; } = 2;
 
     public int RetentionDays { get; set; } = 365;
+
+    public bool ShowEncryptionDetails { get; set; }
 }

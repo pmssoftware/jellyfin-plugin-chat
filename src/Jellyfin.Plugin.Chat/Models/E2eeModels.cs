@@ -219,4 +219,6 @@ public sealed class CryptoChannelBootstrap
     public IReadOnlyList<CryptoKeyPackageInfo> PendingKeyPackages { get; set; } = Array.Empty<CryptoKeyPackageInfo>();
 
     public IReadOnlyList<ChatCryptoEvent> Events { get; set; } = Array.Empty<ChatCryptoEvent>();
+
+    public bool AllParticipantsReady { get; set; }
 }

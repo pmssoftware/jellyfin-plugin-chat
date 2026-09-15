@@ -68,15 +68,22 @@ public sealed class ChatController : ControllerBase
 
         var user = CurrentUser();
         var isEnabled = plugin.Store.IsChatEnabledFor(user.Id);
+        var channels = isEnabled && user.Id.HasValue ? plugin.Store.GetChannelsForUser(includeArchived: false, user.Id.Value) : Array.Empty<ChatChannel>();
+        foreach (var channel in channels.Where(item => item.IsPrivate && item.MemberUserIds.Count == 2))
+        {
+            var otherId = channel.MemberUserIds.First(id => id != user.Id);
+            channel.Name = _userManager.GetUserById(otherId)?.Username ?? channel.Name;
+        }
         return Ok(new ChatBootstrap
         {
-            Channels = isEnabled ? plugin.Store.GetChannels(includeArchived: false) : Array.Empty<ChatChannel>(),
+            Channels = channels,
             IsAdministrator = user.IsAdministrator,
             IsMuted = plugin.Store.IsMuted(user.Id),
             IsEnabled = isEnabled,
             CurrentUserName = user.Name,
             CurrentUserId = user.Id,
-            MessageLimit = plugin.Store.GetSettings().MessageLimit
+            MessageLimit = plugin.Store.GetSettings().MessageLimit,
+            ShowEncryptionDetails = plugin.Store.GetSettings().ShowEncryptionDetails
         });
     }
 
@@ -111,6 +118,28 @@ public sealed class ChatController : ControllerBase
     public ActionResult GetCryptoDevices()
     {
         return Plugin.Instance is { } plugin ? Ok(plugin.Store.GetCryptoDevices()) : NotFound();
+    }
+
+    [HttpPost("PrivateChat")]
+    [Authorize]
+    public ActionResult<ChatChannel> OpenPrivateChat([FromBody] CreatePrivateChannelRequest input)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue) return Unauthorized();
+        if (Plugin.Instance is not { } plugin) return NotFound();
+        var requestedName = input.UserName?.Trim() ?? string.Empty;
+        var other = _userManager.GetUsers().FirstOrDefault(candidate =>
+            candidate.LastLoginDate.HasValue
+            && string.Equals(candidate.Username, requestedName, StringComparison.OrdinalIgnoreCase));
+        if (other is null || other.Id == user.Id) return NoContent();
+        try
+        {
+            var channel = plugin.Store.AddOrGetPrivateChannel(user.Id.Value, other.Id, other.Username);
+            channel.Name = other.Username;
+            return Ok(channel);
+        }
+        catch (UnauthorizedAccessException exception) { return StatusCode(403, new { Message = exception.Message }); }
+        catch (InvalidOperationException exception) { return BadRequest(new { Message = exception.Message }); }
     }
 
     [HttpDelete("Crypto/Devices/{deviceId:guid}")]
@@ -268,7 +297,7 @@ public sealed class ChatController : ControllerBase
     }
 
     [HttpDelete("Crypto/Messages/{id:guid}")]
-    [Authorize(Policy = Policies.RequiresElevation)]
+    [Authorize]
     public ActionResult DeleteEncryptedMessage([FromRoute] Guid id)
     {
         var user = CurrentUser();
@@ -277,9 +306,11 @@ public sealed class ChatController : ControllerBase
             return Unauthorized();
         }
 
-        return Plugin.Instance?.Store.DeleteEncryptedMessage(id, user.Id.Value, user.Name) is not null
-            ? NoContent()
-            : NotFound();
+        try
+        {
+            return Plugin.Instance?.Store.DeleteEncryptedMessage(id, user.Id.Value, user.Name, user.IsAdministrator) is not null ? NoContent() : NotFound();
+        }
+        catch (UnauthorizedAccessException exception) { return StatusCode(403, new { Message = exception.Message }); }
     }
 
     [HttpGet("Messages")]
@@ -292,7 +323,8 @@ public sealed class ChatController : ControllerBase
             return Problem("Jellyfin Chat is not ready.", statusCode: StatusCodes.Status503ServiceUnavailable);
         }
 
-        return plugin.Store.IsChatEnabledFor(CurrentUser().Id)
+        var user = CurrentUser();
+        return plugin.Store.IsChatEnabledFor(user.Id) && user.Id.HasValue && plugin.Store.CanAccessChannel(channelId, user.Id.Value)
             ? Ok(plugin.Store.GetMessages(channelId, afterUtc, limit))
             : StatusCode(StatusCodes.Status403Forbidden, new { Message = "Chat is not enabled for this user." });
     }
@@ -311,14 +343,27 @@ public sealed class ChatController : ControllerBase
     [Authorize(Policy = Policies.RequiresElevation)]
     public ActionResult DeleteMessage([FromRoute] Guid id)
     {
-        return Plugin.Instance?.Store.DeleteMessage(id) == true ? NoContent() : NotFound();
+        var user = CurrentUser();
+        if (!user.Id.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        try
+        {
+            return Plugin.Instance?.Store.DeleteMessage(id, user.Id.Value) == true ? NoContent() : NotFound();
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { Message = exception.Message });
+        }
     }
 
     [HttpGet("Channels")]
     [Authorize(Policy = Policies.RequiresElevation)]
     public ActionResult GetAllChannels()
     {
-        return Plugin.Instance is { } plugin ? Ok(plugin.Store.GetChannels(includeArchived: true)) : NotFound();
+        return Plugin.Instance is { } plugin ? Ok(plugin.Store.GetChannels(includeArchived: true).Where(channel => !channel.IsPrivate)) : NotFound();
     }
 
     [HttpPost("Channels")]
@@ -334,6 +379,10 @@ public sealed class ChatController : ControllerBase
         input.Name = validation.Name!;
         input.Description = validation.Description!;
         input.Kind = validation.Kind!;
+        if (input.IsRestricted && input.MemberUserIds.Distinct().Count() < 1)
+            return BadRequest(new { Message = "Select at least one member for a restricted channel." });
+        if (input.IsRestricted && !ValidateRestrictedMembers(input.MemberUserIds, minimum: 2, out var memberError))
+            return BadRequest(new { Message = memberError });
         try
         {
             var channel = Plugin.Instance?.Store.AddChannel(input);
@@ -358,6 +407,10 @@ public sealed class ChatController : ControllerBase
         input.Name = validation.Name!;
         input.Description = validation.Description!;
         input.Kind = validation.Kind!;
+        if (input.IsRestricted && input.MemberUserIds.Distinct().Count() < 1)
+            return BadRequest(new { Message = "Select at least one member for a restricted channel." });
+        if (input.IsRestricted && !ValidateRestrictedMembers(input.MemberUserIds, minimum: 2, out var memberError))
+            return BadRequest(new { Message = memberError });
         try
         {
             var channel = Plugin.Instance?.Store.UpdateChannel(id, input);
@@ -374,6 +427,19 @@ public sealed class ChatController : ControllerBase
     public ActionResult DeleteChannel([FromRoute] Guid id)
     {
         return Plugin.Instance?.Store.DeleteChannel(id) == true ? NoContent() : BadRequest(new { Message = "Default channels cannot be deleted." });
+    }
+
+    [HttpDelete("PrivateChat/{id:guid}")]
+    [Authorize]
+    public ActionResult DeletePrivateChat([FromRoute] Guid id)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue)
+        {
+            return Unauthorized();
+        }
+
+        return Plugin.Instance?.Store.DeletePrivateChannel(id, user.Id.Value) == true ? NoContent() : NotFound();
     }
 
     [HttpGet("Mutes")]
@@ -503,5 +569,15 @@ public sealed class ChatController : ControllerBase
         return normalizedKind is null
             ? (null, null, null, "Choose Chat or Announcement as the channel type.")
             : (normalizedName, normalizedDescription, normalizedKind, null);
+    }
+
+    private bool ValidateRestrictedMembers(System.Collections.Generic.IEnumerable<Guid> ids, int minimum, out string error)
+    {
+        var distinct = ids.Where(id => id != Guid.Empty).Distinct().ToList();
+        if (distinct.Count < minimum) { error = "Select at least two enabled Jellyfin users."; return false; }
+        if (distinct.Any(id => _userManager.GetUserById(id) is not { LastLoginDate: not null })
+            || Plugin.Instance is not { } plugin || distinct.Any(id => !plugin.Store.IsUserEnabled(id)))
+        { error = "All selected members must be existing, previously connected, enabled users."; return false; }
+        error = string.Empty; return true;
     }
 }
