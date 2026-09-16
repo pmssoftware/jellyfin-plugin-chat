@@ -142,6 +142,25 @@ public sealed class ChatController : ControllerBase
         catch (InvalidOperationException exception) { return BadRequest(new { Message = exception.Message }); }
     }
 
+    [HttpPost("Blocks/{userId:guid}")]
+    [Authorize]
+    public ActionResult BlockUser([FromRoute] Guid userId)
+    {
+        var user = CurrentUser();
+        var other = _userManager.GetUserById(userId);
+        if (!user.Id.HasValue || other is null) return NotFound();
+        return Plugin.Instance?.Store.BlockUser(user.Id.Value, userId, other.Username) == true ? NoContent() : BadRequest();
+    }
+
+    [HttpDelete("Blocks/{userId:guid}")]
+    [Authorize]
+    public ActionResult UnblockUser([FromRoute] Guid userId)
+    {
+        var user = CurrentUser();
+        if (!user.Id.HasValue) return Unauthorized();
+        return Plugin.Instance?.Store.UnblockUser(user.Id.Value, userId) == true ? NoContent() : NotFound();
+    }
+
     [HttpDelete("Crypto/Devices/{deviceId:guid}")]
     [Authorize(Policy = Policies.RequiresElevation)]
     public ActionResult RevokeCryptoDevice([FromRoute] Guid deviceId)

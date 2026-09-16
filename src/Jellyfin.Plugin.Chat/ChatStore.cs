@@ -75,6 +75,10 @@ public sealed class ChatStore
                 throw new InvalidOperationException("Choose another Jellyfin user.");
             if (!IsUserEnabledUnsafe(currentUserId) || !IsUserEnabledUnsafe(otherUserId))
                 throw new UnauthorizedAccessException("Private chat is not enabled for this user.");
+            if (_state.BlockedUsers.Any(block =>
+                (block.OwnerUserId == currentUserId && block.UserId == otherUserId)
+                || (block.OwnerUserId == otherUserId && block.UserId == currentUserId)))
+                throw new UnauthorizedAccessException("This user has blocked private chats with you.");
             var ids = new[] { currentUserId, otherUserId }.OrderBy(id => id).ToList();
             var pairKey = string.Join(":", ids);
             var existing = _state.Channels.FirstOrDefault(channel => channel.IsPrivate && channel.DirectPairKey == pairKey && !channel.IsArchived);
@@ -847,6 +851,28 @@ public sealed class ChatStore
         }
     }
 
+    public bool BlockUser(Guid ownerUserId, Guid userId, string userName)
+    {
+        lock (_sync)
+        {
+            if (ownerUserId == Guid.Empty || userId == Guid.Empty || ownerUserId == userId) return false;
+            if (_state.BlockedUsers.Any(block => block.OwnerUserId == ownerUserId && block.UserId == userId)) return true;
+            _state.BlockedUsers.Add(new BlockedUser { OwnerUserId = ownerUserId, UserId = userId, UserName = userName, BlockedAtUtc = DateTime.UtcNow });
+            SaveUnsafe();
+            return true;
+        }
+    }
+
+    public bool UnblockUser(Guid ownerUserId, Guid userId)
+    {
+        lock (_sync)
+        {
+            var removed = _state.BlockedUsers.RemoveAll(block => block.OwnerUserId == ownerUserId && block.UserId == userId) > 0;
+            if (removed) SaveUnsafe();
+            return removed;
+        }
+    }
+
     public bool IsChatEnabledFor(Guid? userId)
     {
         lock (_sync)
@@ -948,6 +974,7 @@ public sealed class ChatStore
             _state.Channels ??= new List<ChatChannel>();
             _state.Messages ??= new List<ChatMessage>();
             _state.MutedUsers ??= new List<MutedUser>();
+            _state.BlockedUsers ??= new List<BlockedUser>();
             _state.UserAccessRules ??= new List<ChatUserAccessRule>();
             _state.CryptoDevices ??= new List<ChatCryptoDevice>();
             _state.CryptoKeyPackages ??= new List<ChatCryptoKeyPackage>();
@@ -1056,8 +1083,12 @@ public sealed class ChatStore
         return channel;
     }
 
-    private static bool CanAccessChannelUnsafe(ChatChannel channel, Guid userId)
+    private bool CanAccessChannelUnsafe(ChatChannel channel, Guid userId)
     {
+        if (channel.IsPrivate && _state.BlockedUsers.Any(block =>
+            (block.OwnerUserId == userId && channel.MemberUserIds.Contains(block.UserId))
+            || (channel.MemberUserIds.Contains(userId) && block.OwnerUserId != userId && block.UserId == userId)))
+            return false;
         return !channel.IsPrivate && !channel.IsRestricted
             || (channel.MemberUserIds ?? new List<Guid>()).Contains(userId);
     }
