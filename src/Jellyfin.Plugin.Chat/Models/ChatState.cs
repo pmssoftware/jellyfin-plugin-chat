@@ -12,6 +12,8 @@ public sealed class ChatState
 
     public List<MutedUser> MutedUsers { get; set; } = new();
 
+    public List<BlockedUser> BlockedUsers { get; set; } = new();
+
     public List<ChatUserAccessRule> UserAccessRules { get; set; } = new();
 
     public List<ChatCryptoDevice> CryptoDevices { get; set; } = new();
