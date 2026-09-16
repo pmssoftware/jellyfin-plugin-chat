@@ -106,6 +106,7 @@ jobs:
           cp manifest.json "$RUNNER_TEMP/manifest.json"
           git fetch origin "$DEFAULT_BRANCH"
           git reset --hard "origin/$DEFAULT_BRANCH"
+          git switch -C "$DEFAULT_BRANCH"
           cp "$RUNNER_TEMP/manifest.json" manifest.json
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
