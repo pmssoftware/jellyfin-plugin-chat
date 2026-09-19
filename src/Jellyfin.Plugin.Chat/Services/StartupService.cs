@@ -63,10 +63,11 @@ public sealed class StartupService : IScheduledTask
             var payloadJson = JsonSerializer.Serialize(new
             {
                 id = TransformationId,
-                // File Transformation treats this value as a regular expression.
-                // Keep it anchored so chunks such as itemDetails-index-html.*.js
-                // are never mistaken for Jellyfin Web's entry document.
-                fileNamePattern = "^index\\.html$",
+                // Use the exact path key so this pipeline wins before File
+                // Transformation's regex fallback. IndexHtml also refuses to
+                // alter responses without a closing body tag, which keeps
+                // similarly named JavaScript chunks untouched.
+                fileNamePattern = "index.html",
                 callbackAssembly = GetType().Assembly.FullName,
                 callbackClass = typeof(WebTransformations).FullName,
                 callbackMethod = nameof(WebTransformations.IndexHtml)
