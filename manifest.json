@@ -9,20 +9,20 @@
     "imageUrl": "https://raw.githubusercontent.com/pmssoftware/jellyfin-plugin-chat/main/artwork/plugin-banner.png",
     "versions": [
       {
-        "version": "1.2.0.4",
+        "version": "1.2.0.5",
         "changelog": "See the linked GitHub release for changes.",
         "targetAbi": "10.11.11.0",
-        "sourceUrl": "https://github.com/pmssoftware/jellyfin-plugin-chat/releases/download/v1.2.0.4/chat_10.11_1.2.0.4.zip",
-        "checksum": "547E31D78F870776291BBD51F7A70794",
-        "timestamp": "2026-09-16T16:49:03Z"
+        "sourceUrl": "https://github.com/pmssoftware/jellyfin-plugin-chat/releases/download/v1.2.0.5/chat_10.11_1.2.0.5.zip",
+        "checksum": "B505B2C47BEA4CF8309EAA88391855E5",
+        "timestamp": "2026-09-19T05:54:36Z"
       },
       {
-        "version": "1.2.0.4",
+        "version": "1.2.0.5",
         "changelog": "See the linked GitHub release for changes.",
         "targetAbi": "12.0.0.0",
-        "sourceUrl": "https://github.com/pmssoftware/jellyfin-plugin-chat/releases/download/v1.2.0.4/chat_12.0_1.2.0.4.zip",
-        "checksum": "6054A38E510445046298CBEC9C0345F9",
-        "timestamp": "2026-09-16T16:49:03Z"
+        "sourceUrl": "https://github.com/pmssoftware/jellyfin-plugin-chat/releases/download/v1.2.0.5/chat_12.0_1.2.0.5.zip",
+        "checksum": "B4EA865987701272C709A44ED97A5925",
+        "timestamp": "2026-09-19T05:54:36Z"
       }
     ]
   }
